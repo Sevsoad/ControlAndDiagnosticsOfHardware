@@ -18,6 +18,7 @@ namespace Kidsvt1
     {
         const int TotalInputsCount = 13;
         private List<LogicElement> elements;
+        private List<Polynom> polynoms;
         private List<LogicElement> startElements;
         public Form1()
         {
@@ -28,31 +29,25 @@ namespace Kidsvt1
         private void button1_Click(object sender, EventArgs e)
         {
             InitializeLogicElements();
+            InitializePolynoms();
 
-            textBox1.Text += "LFSR random generation started" + Environment.NewLine;
-            var minInitList = 0;
-            var minInitState = GetMinInitState(out minInitList);
-            
-            textBox1.Text += "Calculated rational initial state:";
+            var testSequence = GetTestInput();
+            var result = TestPolynomsInSA(testSequence);
 
-            foreach (var i in minInitState)
-            {
-                textBox1.Text += i ? "1 " : "0 ";
-            }
-
-            textBox1.Text += Environment.NewLine + "Number of test inputs to cover: " + minInitList;
+            textBox1.Text += result;
         }
 
-        private List<bool> GetMinInitState(out int iterationsToCover)
+        private List<List<bool>> GetTestInput()
         {
             var states = new BitArray(7);
             var combinationsCount = 0;
             var minInitList = new List<bool>();
-            var minCombCount = 200;
-            var iterations = 0;
+            var inputsList = new List<bool>();
+            var testList = new List<List<bool>>();
+            var checker = new CoverageCheker(elements);
 
             IterateBits(states);
-            for (var j = 1; j < 128; j++)
+            for (var j = 1; j < 127; j++)
             {
                 combinationsCount = 0;
                 var initList = new List<bool>();
@@ -61,120 +56,26 @@ namespace Kidsvt1
                     initList.Add((bool)index);
                 }
 
-                LFSR lfsr1 = new LFSR(initList);
-                var tempInputList = new List<List<bool>>();
-
-                while (CalculateCoveredFaults(tempInputList) < 26)
+                if (j == 92)
                 {
-                    var tmpRandInput = new List<bool>();
-                    for (var i = 0; i < 7; i++)
+                    LFSR lfsr1 = new LFSR(new List<bool>(initList));
+                    var tempInputList = new List<List<bool>>();
+
+                    while (checker.CheckCoversForInputs(tempInputList) < 26)
                     {
-                        tmpRandInput.Add(lfsr1.states[6]);
+                        var tmpRandInput = new List<bool>();
                         lfsr1.Iterate();
+                        tempInputList.Add(new List<bool>(lfsr1.states));
+
+                        combinationsCount++;
                     }
-                    tempInputList.Add(new List<bool>(lfsr1.states));
-
-                    combinationsCount++;
+                    testList = tempInputList;
                 }
-
-                if (combinationsCount < minCombCount)
-                {
-                    minCombCount = combinationsCount;
-                    minInitList.RemoveRange(0, minInitList.Count);
-                    minInitList.AddRange(initList);
-                }
-                iterations++;
+                
                 IterateBits(states);
             }
 
-            iterationsToCover = minCombCount;
-            return minInitList;
-        }
-
-        private int CalculateCoveredFaults(List<List<bool>> coversList)
-        {
-            var outPole = new List<bool>();
-            var outPoleTmp = new List<bool>();
-            var coveredFaults = 0;
-
-            for (var i = 0; i < coversList.Count; i++)
-            {
-                var combinations = coversList[i];
-
-                for (var k = 0; k < combinations.Count; k++)
-                {
-                    outPole.Add(combinations[k]);
-                }
-
-                var el1result = elements[0].LogicOperation(
-                        new[] { combinations[0], combinations[1] });
-                outPole.Add(el1result);
-
-                var el2result = elements[1].LogicOperation(
-                        new[] { combinations[2] });
-                outPole.Add(el2result);
-
-                var el3result = elements[2].LogicOperation(
-                        new[] { combinations[4], combinations[5] });
-                outPole.Add(el3result);
-
-                var el4result = elements[3].LogicOperation(
-                        new[] { combinations[3], combinations[6], el3result });
-                outPole.Add(el4result);
-
-                var el5result = elements[4].LogicOperation(
-                        new[] { el2result, el4result });
-                outPole.Add(el5result);
-
-                var el6result = elements[5].LogicOperation(
-                        new[] { el1result, el5result });
-                outPole.Add(el6result);
-
-                for (var j = 0; j < 6; j++)
-                {
-                    if (!elements[j].Const0Covered)
-                        elements[j].Const0Covered = outPole[j + combinations.Count];
-
-                    if (!elements[j].Const1Covered)
-                        elements[j].Const1Covered = !outPole[j + combinations.Count];
-                }
-
-                for (var j = 0; j < combinations.Count; j++)
-                {
-                    if (!elements[j + 6].Const0Covered)
-                        elements[j + 6].Const0Covered = outPole[j];
-
-                    if (!elements[j + 6].Const1Covered)
-                    elements[j + 6].Const1Covered = !outPole[j];
-                }
-
-                outPole = new List<bool>();
-            }
-
-            foreach (var item in elements)
-            {
-                if (item.Const0Covered)
-                {
-                    coveredFaults++;
-                }
-                if (item.Const1Covered)
-                {
-                    coveredFaults++;
-                }
-            }
-
-            ClearCoveredFaults();
-
-            return coveredFaults;
-        }
-
-        private void ClearCoveredFaults()
-        {
-            for (var i = 0; i < elements.Count; i++)
-            {
-                elements[i].Const0Covered = false;
-                elements[i].Const1Covered = false;
-            }
+            return testList;
         }
 
         private void IterateBits(BitArray combinations)
@@ -328,6 +229,180 @@ namespace Kidsvt1
                 }
             }
         }
-       
+
+        private void InitializePolynoms()
+        {
+            polynoms = new List<Polynom>();
+            var polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[5] ^ x[4] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[4] ^ x[2] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 5,
+                LogicOperation = (x, y) => (x[7] ^ x[6] ^ x[5] 
+                    ^ x[4] ^ x[3] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[5] ^ x[4] ^ x[3] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[4] ^ x[2] ^ x[1] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[5] ^ x[2] ^ x[1] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 5,
+                LogicOperation = (x, y) => (x[7] ^ x[6] ^ x[5]
+                    ^ x[2] ^ x[1] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[6] ^ x[5] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[4] ^ x[2] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[6] ^ x[5] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 5,
+                LogicOperation = (x, y) => (x[7] ^ x[6] ^ x[5]
+                    ^ x[4] ^ x[3] ^ x[1] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[5] ^ x[4] ^ x[3] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[4] ^ x[2] ^ x[1] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[5] ^ x[2] ^ x[1] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 5,
+                LogicOperation = (x, y) => (x[7] ^ x[6] ^ x[5]
+                    ^ x[2] ^ x[1] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 3,
+                LogicOperation = (x, y) => (x[7] ^ x[6] ^ x[5] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 1,
+                LogicOperation = (x, y) => (x[2] ^ x[1] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 1,
+                LogicOperation = (x, y) => (x[2] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 1,
+                LogicOperation = (x, y) => (x[3] ^ x[2] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 1,
+                LogicOperation = (x, y) => (x[3] ^ x[0] ^ y)
+            };
+            polynoms.Add(polynom);
+
+            polynom = new Polynom
+            {
+                XorsCount = 1,
+                LogicOperation = (x, y) => (x[4] ^ x[2] ^ y)
+            };
+            polynoms.Add(polynom);
+        }
+
+        private string TestPolynomsInSA(List<List<bool>> testSequences)
+        {
+            var sb = new StringBuilder();
+
+            for (var i = 0; i < polynoms.Count; i++)
+            {
+                var sa = new SA(polynoms[i], elements);
+                sa.GenerateSignature(testSequences);
+                var coveredFaults = sa.RunTestForAllFaults(testSequences);
+
+                var coverage = String.Format("{0:0.00}", coveredFaults / 26.0f * 100);
+                sb.Append("Polynom " + (i + 1) +": coverage "
+                    + coverage
+                    + "%, xor count : "
+                    + polynoms[i].XorsCount + Environment.NewLine);
+            }
+
+            return sb.ToString();
+        }       
     }
 }
